@@ -1,0 +1,81 @@
+services:
+
+  # ── MySQL Primário (ESCRITA) ──────────────────────────────────────────────
+  mysql-primary:
+    image: mysql:8.0
+    container_name: mysql-primary
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: aula-db
+    # Opções passadas direto na linha de comando para evitar problema de
+    # permissão dos arquivos .cnf montados pelo Windows (world-writable = ignorado pelo MySQL)
+    command: >
+      mysqld
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --binlog-do-db=aula-db
+    ports:
+      - "3306:3306"
+    volumes:
+      - primary-data:/var/lib/mysql
+      - ./docker/init-primary.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - replication-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── MySQL Réplica (LEITURA) ───────────────────────────────────────────────
+  mysql-replica:
+    image: mysql:8.0
+    container_name: mysql-replica
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    command: >
+      mysqld
+      --server-id=2
+      --relay-log=relay-bin
+      --read-only=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+    ports:
+      - "3307:3306"
+    volumes:
+      - replica-data:/var/lib/mysql
+    networks:
+      - replication-net
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Configurador de Replicação (roda uma vez e sai) ──────────────────────
+  replica-setup:
+    image: mysql:8.0
+    container_name: replica-setup
+    volumes:
+      - ./docker/setup-replica.sh:/setup-replica.sh:ro
+    networks:
+      - replication-net
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+      mysql-replica:
+        condition: service_healthy
+    command: bash /setup-replica.sh
+    restart: "no"
+
+volumes:
+  primary-data:
+  replica-data:
+
+networks:
+  replication-net:
+    driver: bridge

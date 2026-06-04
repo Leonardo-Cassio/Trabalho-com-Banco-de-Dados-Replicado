@@ -1,0 +1,18 @@
+# Java
+java-app/target/
+
+# Node.js
+api-rest/node_modules/
+api-rest/.env
+
+# Docker volumes e temporários
+*.sql.bak
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini

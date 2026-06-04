@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — Replicação de Banco de Dados</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3e;
+      --primary:   #6c63ff;
+      --primary-h: #574fd6;
+      --green:     #22c55e;
+      --yellow:    #eab308;
+      --red:       #ef4444;
+      --blue:      #3b82f6;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --radius:    10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 24px 16px 48px;
+    }
+
+    /* ── Header ── */
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--primary);
+      letter-spacing: -0.5px;
+    }
+    header p {
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: .9rem;
+    }
+    .badge-replica {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #1e293b;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: .75rem;
+      color: var(--green);
+      margin-top: 10px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid;
+      gap: 20px;
+      max-width: 1100px;
+      margin: 0 auto;
+      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-icon {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+    .icon-purple { background: #312e81; }
+    .icon-blue   { background: #1e3a5f; }
+    .icon-yellow { background: #422006; }
+    .icon-green  { background: #14532d; }
+
+    .card-header h2 { font-size: .95rem; font-weight: 600; }
+    .card-header .method {
+      font-size: .7rem;
+      background: #312e81;
+      color: #a5b4fc;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: auto;
+      font-family: monospace;
+    }
+
+    .card-body { padding: 16px 20px; }
+
+    /* ── Form ── */
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    input[type="number"], input[type="text"] {
+      flex: 1;
+      background: #0f1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: .875rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus { border-color: var(--primary); }
+
+    button {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 18px;
+      font-size: .875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s;
+      white-space: nowrap;
+    }
+    button:hover { background: var(--primary-h); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    button.secondary {
+      background: #1e293b;
+      border: 1px solid var(--border);
+    }
+    button.secondary:hover { background: #2a3548; }
+
+    /* ── Result area ── */
+    .result {
+      background: #0a0c12;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      min-height: 80px;
+      max-height: 380px;
+      overflow-y: auto;
+      font-size: .8rem;
+    }
+    .result-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 80px;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    /* ── Table ── */
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      background: #12141f;
+      padding: 8px 12px;
+      text-align: left;
+      font-size: .72rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      position: sticky; top: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #1a1d27;
+      font-size: .8rem;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #12141f; }
+
+    /* ── Status badge ── */
+    .status {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: .7rem;
+      font-weight: 600;
+    }
+    .status-FINALIZADO  { background:#14532d; color:#86efac; }
+    .status-APROVADO    { background:#1e3a5f; color:#93c5fd; }
+    .status-PENDENTE    { background:#422006; color:#fdba74; }
+    .status-ENVIADO     { background:#312e81; color:#c4b5fd; }
+    .status-CANCELADO   { background:#450a0a; color:#fca5a5; }
+
+    /* ── KPI cards ── */
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .kpi {
+      background: #12141f;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .kpi-value { font-size: 1.3rem; font-weight: 700; color: var(--primary); }
+    .kpi-label { font-size: .65rem; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: .5px; }
+
+    /* ── Error / loading ── */
+    .msg-error   { color: var(--red);    padding: 10px 14px; }
+    .msg-loading { color: var(--muted);  padding: 10px 14px; animation: pulse 1s infinite; }
+
+    /* ── Auto-refresh toggle ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .toolbar label { font-size: .8rem; color: var(--muted); }
+    select {
+      background: #0f1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: var(--text);
+      font-size: .8rem;
+    }
+
+    /* ── Currency ── */
+    .currency { font-family: monospace; }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Dashboard — Replicação de Banco de Dados</h1>
+  <p>Gabriel Fillip e Leonardo Cassio</p>
+  <div class="badge-replica">
+    <span class="dot"></span>
+    Leituras via réplica (porta 3307)
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- ── 1. Pedido por ID ── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon icon-purple">📦</div>
+      <div>
+        <h2>Buscar Pedido por ID</h2>
+        <div style="font-size:.72rem;color:var(--muted)">GET /pedidos/:id</div>
+      </div>
+      <span class="method">GET</span>
+    </div>
+    <div class="card-body">
+      <div class="input-row">
+        <input type="number" id="pedido-id" placeholder="ID do pedido (ex: 1)" min="1" />
+        <button onclick="buscarPedido()">Buscar</button>
+      </div>
+      <div class="result" id="result-pedido">
+        <div class="result-empty">Digite um ID e clique em Buscar</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2. Pedidos do cliente ── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon icon-blue">👤</div>
+      <div>
+        <h2>Pedidos do Cliente</h2>
+        <div style="font-size:.72rem;color:var(--muted)">GET /clientes/:id/pedidos</div>
+      </div>
+      <span class="method">GET</span>
+    </div>
+    <div class="card-body">
+      <div class="input-row">
+        <input type="number" id="cliente-id" placeholder="ID do cliente (ex: 1)" min="1" />
+        <button onclick="buscarPedidosCliente()">Buscar</button>
+      </div>
+      <div class="result" id="result-cliente">
+        <div class="result-empty">Digite um ID e clique em Buscar</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Baixo estoque ── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon icon-yellow">⚠️</div>
+      <div>
+        <h2>Produtos com Baixo Estoque</h2>
+        <div style="font-size:.72rem;color:var(--muted)">GET /produtos/baixo-estoque</div>
+      </div>
+      <span class="method">GET</span>
+    </div>
+    <div class="card-body">
+      <div class="input-row">
+        <button onclick="buscarBaixoEstoque()">Carregar</button>
+        <button class="secondary" onclick="limpar('result-estoque')">Limpar</button>
+      </div>
+      <div class="result" id="result-estoque">
+        <div class="result-empty">Clique em Carregar</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Relatório de vendas ── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon icon-green">📊</div>
+      <div>
+        <h2>Relatório de Vendas</h2>
+        <div style="font-size:.72rem;color:var(--muted)">GET /relatorios/vendas</div>
+      </div>
+      <span class="method">GET</span>
+    </div>
+    <div class="card-body">
+      <div class="toolbar">
+        <button onclick="buscarRelatorio()">Carregar</button>
+        <button class="secondary" onclick="toggleAutoRefresh()">⟳ Auto-refresh</button>
+        <label>a cada</label>
+        <select id="refresh-interval">
+          <option value="3000">3s</option>
+          <option value="5000" selected>5s</option>
+          <option value="10000">10s</option>
+        </select>
+        <span id="refresh-status" style="font-size:.75rem;color:var(--muted)"></span>
+      </div>
+      <div id="kpis-relatorio"></div>
+      <div class="result" id="result-relatorio">
+        <div class="result-empty">Clique em Carregar</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const api = (path) => fetch(path).then(r => r.json());
+
+  // ── Utilitários ──────────────────────────────────────────────────
+  function brl(v) {
+    return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  }
+
+  function statusBadge(s) {
+    return `<span class="status status-${s}">${s}</span>`;
+  }
+
+  function loading(id) {
+    document.getElementById(id).innerHTML = '<div class="msg-loading">Consultando réplica...</div>';
+  }
+
+  function erro(id, msg) {
+    document.getElementById(id).innerHTML = `<div class="msg-error">Erro: ${msg}</div>`;
+  }
+
+  function limpar(id) {
+    document.getElementById(id).innerHTML = '<div class="result-empty">—</div>';
+  }
+
+  function table(cols, rows, render) {
+    if (!rows.length) return '<div class="result-empty">Nenhum resultado encontrado.</div>';
+    const ths = cols.map(c => `<th>${c}</th>`).join('');
+    const trs = rows.map(r => `<tr>${render(r)}</tr>`).join('');
+    return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+  }
+
+  // ── 1. Pedido por ID ─────────────────────────────────────────────
+  async function buscarPedido() {
+    const id = document.getElementById('pedido-id').value;
+    if (!id) return;
+    loading('result-pedido');
+    try {
+      const d = await api(`/pedidos/${id}`);
+      if (d.erro) { erro('result-pedido', d.erro); return; }
+
+      const itensHtml = table(
+        ['Item', 'Produto', 'Qtd', 'Valor Unit.', 'Subtotal'],
+        d.itens || [],
+        i => `
+          <td>${i.id}</td>
+          <td>${i.produto}</td>
+          <td>${i.quantidade}</td>
+          <td class="currency">${brl(i.valor_unitario)}</td>
+          <td class="currency">${brl(i.subtotal)}</td>`
+      );
+
+      document.getElementById('result-pedido').innerHTML = `
+        <table>
+          <thead><tr><th>Campo</th><th>Valor</th></tr></thead>
+          <tbody>
+            <tr><td>ID</td><td>${d.id}</td></tr>
+            <tr><td>Cliente</td><td>${d.cliente_nome} (ID ${d.cliente_id})</td></tr>
+            <tr><td>E-mail</td><td>${d.cliente_email}</td></tr>
+            <tr><td>Status</td><td>${statusBadge(d.status)}</td></tr>
+            <tr><td>Valor Total</td><td class="currency">${brl(d.valor_total)}</td></tr>
+            <tr><td>Criado em</td><td>${new Date(d.criado_em).toLocaleString('pt-BR')}</td></tr>
+          </tbody>
+        </table>
+        <div style="padding:8px 12px 4px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Itens do Pedido</div>
+        ${itensHtml}`;
+    } catch (e) { erro('result-pedido', e.message); }
+  }
+
+  // ── 2. Pedidos do cliente ─────────────────────────────────────────
+  async function buscarPedidosCliente() {
+    const id = document.getElementById('cliente-id').value;
+    if (!id) return;
+    loading('result-cliente');
+    try {
+      const d = await api(`/clientes/${id}/pedidos`);
+      if (d.erro) { erro('result-cliente', d.erro); return; }
+
+      const info = `<div style="padding:10px 14px;font-size:.8rem;border-bottom:1px solid var(--border)">
+        Cliente: <strong>${d.cliente.nome}</strong> — ${d.cliente.email}
+        &nbsp;|&nbsp; Total de pedidos: <strong>${d.total_pedidos}</strong>
+      </div>`;
+
+      const lista = table(
+        ['ID', 'Status', 'Valor Total', 'Itens', 'Criado em'],
+        d.pedidos,
+        p => `
+          <td>${p.id}</td>
+          <td>${statusBadge(p.status)}</td>
+          <td class="currency">${brl(p.valor_total)}</td>
+          <td>${p.total_itens}</td>
+          <td>${new Date(p.criado_em).toLocaleString('pt-BR')}</td>`
+      );
+
+      document.getElementById('result-cliente').innerHTML = info + lista;
+    } catch (e) { erro('result-cliente', e.message); }
+  }
+
+  // ── 3. Baixo estoque ─────────────────────────────────────────────
+  async function buscarBaixoEstoque() {
+    loading('result-estoque');
+    try {
+      const d = await api('/produtos/baixo-estoque');
+      if (d.erro) { erro('result-estoque', d.erro); return; }
+
+      const info = `<div style="padding:10px 14px;font-size:.8rem;border-bottom:1px solid var(--border)">
+        Limiar de estoque: <strong>${d.limiar_estoque}</strong> unidades
+        &nbsp;|&nbsp; Produtos críticos: <strong style="color:var(--red)">${d.total}</strong>
+      </div>`;
+
+      const lista = table(
+        ['ID', 'Produto', 'Categoria', 'Preço', 'Estoque'],
+        d.produtos,
+        p => {
+          const cor = p.estoque <= 5 ? 'var(--red)' : 'var(--yellow)';
+          return `
+            <td>${p.id}</td>
+            <td>${p.descricao}</td>
+            <td>${p.categoria}</td>
+            <td class="currency">${brl(p.valor)}</td>
+            <td style="color:${cor};font-weight:700">${p.estoque}</td>`;
+        }
+      );
+
+      document.getElementById('result-estoque').innerHTML = info + lista;
+    } catch (e) { erro('result-estoque', e.message); }
+  }
+
+  // ── 4. Relatório de vendas ────────────────────────────────────────
+  async function buscarRelatorio() {
+    loading('result-relatorio');
+    document.getElementById('kpis-relatorio').innerHTML = '';
+    try {
+      const d = await api('/relatorios/vendas');
+      if (d.erro) { erro('result-relatorio', d.erro); return; }
+
+      const r = d.resumo_geral;
+      document.getElementById('kpis-relatorio').innerHTML = `
+        <div class="kpis">
+          <div class="kpi">
+            <div class="kpi-value">${r.total_pedidos}</div>
+            <div class="kpi-label">Total Pedidos</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-value">${brl(r.total_vendido)}</div>
+            <div class="kpi-label">Total Vendido</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-value">${brl(r.media_por_pedido)}</div>
+            <div class="kpi-label">Ticket Médio</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-value">${brl(r.maior_pedido)}</div>
+            <div class="kpi-label">Maior Pedido</div>
+          </div>
+        </div>`;
+
+      const porStatus = table(
+        ['Status', 'Pedidos', 'Total'],
+        d.por_status,
+        s => `
+          <td>${statusBadge(s.status)}</td>
+          <td>${s.quantidade}</td>
+          <td class="currency">${brl(s.total_valor)}</td>`
+      );
+
+      const topProdutos = table(
+        ['Produto', 'Categoria', 'Qtd Vendida', 'Receita'],
+        d.top_5_produtos,
+        p => `
+          <td>${p.descricao}</td>
+          <td>${p.categoria}</td>
+          <td>${p.total_vendido}</td>
+          <td class="currency">${brl(p.receita_total)}</td>`
+      );
+
+      document.getElementById('result-relatorio').innerHTML = `
+        <div style="padding:8px 12px 4px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Por Status</div>
+        ${porStatus}
+        <div style="padding:8px 12px 4px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Top 5 Produtos</div>
+        ${topProdutos}`;
+    } catch (e) { erro('result-relatorio', e.message); }
+  }
+
+  // ── Auto-refresh ──────────────────────────────────────────────────
+  let refreshTimer = null;
+
+  function toggleAutoRefresh() {
+    const statusEl = document.getElementById('refresh-status');
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+      statusEl.textContent = '';
+      statusEl.style.color = 'var(--muted)';
+    } else {
+      const ms = Number(document.getElementById('refresh-interval').value);
+      buscarRelatorio();
+      refreshTimer = setInterval(buscarRelatorio, ms);
+      statusEl.textContent = '● ativo';
+      statusEl.style.color = 'var(--green)';
+    }
+  }
+
+  // Enter nos inputs dispara busca
+  document.getElementById('pedido-id').addEventListener('keydown', e => e.key === 'Enter' && buscarPedido());
+  document.getElementById('cliente-id').addEventListener('keydown', e => e.key === 'Enter' && buscarPedidosCliente());
+</script>
+</body>
+</html>

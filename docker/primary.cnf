@@ -1,0 +1,6 @@
+[mysqld]
+server-id          = 1
+log_bin            = mysql-bin
+binlog_do_db       = aula-db
+binlog_format      = ROW
+max_binlog_size    = 100M
