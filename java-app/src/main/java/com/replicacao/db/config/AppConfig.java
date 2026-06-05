@@ -11,9 +11,22 @@ public class AppConfig {
     private final Properties props = new Properties();
 
     public AppConfig() {
+        // 1ª prioridade: config.properties ao lado do JAR (fácil de editar na apresentação)
+        java.io.File externo = new java.io.File("config.properties");
+        if (externo.exists()) {
+            try (InputStream is = new java.io.FileInputStream(externo)) {
+                props.load(is);
+                System.out.println("⚙ Configuração carregada de: " + externo.getAbsolutePath());
+                return;
+            } catch (IOException e) {
+                throw new RuntimeException("Falha ao carregar config.properties externo", e);
+            }
+        }
+        // 2ª prioridade: config.properties embutido no JAR
         try (InputStream is = getClass().getClassLoader().getResourceAsStream("config.properties")) {
-            if (is == null) throw new RuntimeException("config.properties não encontrado no classpath.");
+            if (is == null) throw new RuntimeException("config.properties não encontrado.");
             props.load(is);
+            System.out.println("⚙ Configuração carregada do JAR (embutida).");
         } catch (IOException e) {
             throw new RuntimeException("Falha ao carregar config.properties", e);
         }

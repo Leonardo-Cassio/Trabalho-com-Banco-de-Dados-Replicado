@@ -173,6 +173,21 @@ public class PedidoRepository {
         }
     }
 
+    /**
+     * UPDATE no host primário — altera o status de um pedido.
+     * Retorna true se alguma linha foi afetada.
+     */
+    public boolean atualizarStatus(int pedidoId, String novoStatus) throws SQLException {
+        String sql = "UPDATE pedido SET status = ? WHERE id = ?";
+        try (Connection conn = cm.getWriteConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, novoStatus);
+            ps.setInt(2, pedidoId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
     /** SELECT na réplica — todos os pedidos de um cliente com seus itens. */
     public List<Pedido> buscarPorClienteId(int clienteId) throws SQLException {
         List<Pedido> lista = new ArrayList<>();

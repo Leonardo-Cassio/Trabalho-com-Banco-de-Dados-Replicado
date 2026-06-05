@@ -18,7 +18,7 @@ import java.util.*;
  */
 public class DataGeneratorService {
 
-    private static final String CRIADO_POR = "Gabriel Fillip e Leonardo Cassio";
+    private static final String CRIADO_POR = "Fillip e Cassio"; // max varchar(30)
 
     private static final String[] NOMES = {
             "Ana Silva", "Bruno Costa", "Carla Souza", "Diego Pereira", "Eduarda Lima",
@@ -197,6 +197,62 @@ public class DataGeneratorService {
         // 4.4 Relatório agregado
         System.out.println("\n  4.4 Relatório Agregado (SUM / COUNT / AVG):");
         pedidoRepo.exibirRelatorioAgregado();
+    }
+
+    // ------------------------------------------------------------------
+    // 5. UPDATE — atualiza o status do pedido recém-criado no primário
+    // ------------------------------------------------------------------
+    public void atualizarStatusPedido(Pedido pedido) throws SQLException {
+        // Avança o status para o próximo estágio de forma determinística
+        String[] progresso = {"PENDENTE", "APROVADO", "ENVIADO", "FINALIZADO"};
+        String statusAtual = pedido.getStatus();
+        String novoStatus  = "FINALIZADO"; // padrão: finaliza qualquer status
+
+        for (int i = 0; i < progresso.length - 1; i++) {
+            if (progresso[i].equals(statusAtual)) {
+                novoStatus = progresso[i + 1];
+                break;
+            }
+        }
+
+        boolean atualizado = pedidoRepo.atualizarStatus(pedido.getId(), novoStatus);
+
+        System.out.println("\n========================================");
+        System.out.println(" ATUALIZAÇÃO DE PEDIDO  [WRITE → Primário]");
+        System.out.println("========================================");
+        System.out.printf("  UPDATE pedido SET status = '%s' WHERE id = %d%n", novoStatus, pedido.getId());
+        System.out.printf("  Status anterior : %s%n", statusAtual);
+        System.out.printf("  Status novo     : %s%n", novoStatus);
+        System.out.printf("  Linhas afetadas : %d%n", atualizado ? 1 : 0);
+    }
+
+    // ------------------------------------------------------------------
+    // 6. DELETE — remove um cliente sem pedidos a cada N ciclos
+    // ------------------------------------------------------------------
+    public void removerClienteAntigo() throws SQLException {
+        System.out.println("\n========================================");
+        System.out.println(" REMOÇÃO DE CLIENTE  [WRITE → Primário]");
+        System.out.println("========================================");
+
+        // Busca na réplica um cliente que não tem pedidos (seguro para deletar)
+        var candidato = clienteRepo.buscarClienteSemPedidos();
+
+        if (candidato.isEmpty()) {
+            // Todos os clientes têm pedidos: insere um temporário só para demonstrar o DELETE
+            String nome  = "Cliente Temporário";
+            String email = "temp." + System.currentTimeMillis() + "@email.com";
+            Cliente temp = new Cliente(nome, email, CRIADO_POR);
+            clienteRepo.inserir(temp);
+            System.out.printf("  [INSERT] Nenhum cliente sem pedidos — criado cliente temporário (ID %d)%n", temp.getId());
+            candidato = java.util.Optional.of(temp);
+        }
+
+        Cliente alvo = candidato.get();
+        boolean deletado = clienteRepo.deletar(alvo.getId());
+
+        System.out.printf("  DELETE FROM cliente WHERE id = %d%n", alvo.getId());
+        System.out.printf("  Cliente removido: %s (ID %d)%n", alvo.getNome(), alvo.getId());
+        System.out.printf("  Linhas afetadas : %d%n", deletado ? 1 : 0);
     }
 
     // ------------------------------------------------------------------

@@ -51,6 +51,15 @@ public class Main {
                 System.out.printf("%n╔══════════ CICLO %-4d ══════════╗%n", ciclo);
 
                 Pedido pedido = service.criarPedido();
+
+                // UPDATE — atualiza status do pedido recém-criado no primário
+                service.atualizarStatusPedido(pedido);
+
+                // DELETE — a cada 5 ciclos, remove um cliente sem pedidos do primário
+                if (ciclo % 5 == 0) {
+                    service.removerClienteAntigo();
+                }
+
                 service.executarConsultas(pedido);
 
                 System.out.printf("╚═════════ Fim Ciclo %-4d ════════╝%n", ciclo);

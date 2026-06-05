@@ -55,6 +55,50 @@ public class ClienteRepository {
         return lista;
     }
 
+    /**
+     * SELECT na réplica — retorna um cliente que não possui nenhum pedido associado.
+     * Usado para escolher um candidato seguro para DELETE.
+     */
+    public Optional<Cliente> buscarClienteSemPedidos() throws SQLException {
+        String sql = """
+                SELECT c.id, c.nome, c.email, c.criado_em, c.criado_por
+                FROM cliente c
+                LEFT JOIN pedido p ON p.cliente_id = c.id
+                WHERE p.id IS NULL
+                ORDER BY c.id ASC
+                LIMIT 1
+                """;
+        try (Connection conn = cm.getReadConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            if (rs.next()) {
+                Cliente c = new Cliente();
+                c.setId(rs.getInt("id"));
+                c.setNome(rs.getString("nome"));
+                c.setEmail(rs.getString("email"));
+                c.setCriadoEm(rs.getTimestamp("criado_em").toLocalDateTime());
+                c.setCriadoPor(rs.getString("criado_por"));
+                return Optional.of(c);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * DELETE no host primário — remove um cliente pelo ID.
+     * Só deve ser chamado para clientes sem pedidos (sem FK pendente).
+     */
+    public boolean deletar(int id) throws SQLException {
+        String sql = "DELETE FROM cliente WHERE id = ?";
+        try (Connection conn = cm.getWriteConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, id);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
     /** SELECT na réplica — retorna cliente por ID. */
     public Optional<Cliente> buscarPorId(int id) throws SQLException {
         String sql = "SELECT id, nome, email, criado_em, criado_por FROM cliente WHERE id = ?";
