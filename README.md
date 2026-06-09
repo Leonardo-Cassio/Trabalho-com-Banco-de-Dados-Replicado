@@ -14,10 +14,12 @@ Projeto acadêmico que demonstra, na prática, uma arquitetura de banco de dados
 - [Banco de Dados](#banco-de-dados)
 - [Aplicação Java](#aplicação-java)
 - [API REST (Node.js)](#api-rest-nodejs)
+- [Dashboard Visual](#dashboard-visual)
 - [Teste Local com Docker](#teste-local-com-docker)
-- [Como Executar](#como-executar)
+- [Como Executar na Apresentação](#como-executar-na-apresentação)
 - [Como Testar](#como-testar)
 - [Fluxo de Ciclos](#fluxo-de-ciclos)
+- [Reiniciar os Dados do Zero](#reiniciar-os-dados-do-zero)
 - [Escalabilidade Horizontal](#escalabilidade-horizontal)
 
 ---
@@ -28,7 +30,7 @@ O sistema é composto por dois componentes principais:
 
 | Componente | Linguagem | Responsabilidade |
 |---|---|---|
-| **java-app** | Java 17 + JDBC | Gera dados continuamente e demonstra separação read/write |
+| **java-app** | Java 17 + JDBC | Gera dados continuamente — INSERT, UPDATE e DELETE no primário |
 | **api-rest** | Node.js + Express | API REST que consulta exclusivamente as réplicas de leitura |
 
 Ambos os componentes se conectam ao mesmo banco MySQL (`aula-db`), porém através de conexões distintas:
@@ -46,24 +48,25 @@ Ambos os componentes se conectam ao mesmo banco MySQL (`aula-db`), porém atrav�
 │                                                              │
 │  ┌───────────────┐        ┌──────────────────────────────┐  │
 │  │  Escrita      │──────► │  MySQL PRIMARY (Write)        │  │
-│  │  (INSERT)     │        │  INSERT / UPDATE / DELETE     │  │
-│  └───────────────┘        └──────────┬───────────────────┘  │
-│                                      │ Replicação            │
-│  ┌───────────────┐        ┌──────────▼───────────────────┐  │
-│  │  Leitura      │◄────── │  MySQL REPLICA (Read)         │  │
-│  │  (SELECT)     │        │  SELECT / JOIN / Agregações   │  │
-│  └───────────────┘        └──────────────────────────────┘  │
+│  │  INSERT       │        │  INSERT / UPDATE / DELETE     │  │
+│  │  UPDATE       │        └──────────┬───────────────────┘  │
+│  │  DELETE       │                   │ Replicação            │
+│  └───────────────┘        ┌──────────▼───────────────────┐  │
+│  ┌───────────────┐        │  MySQL REPLICA (Read)         │  │
+│  │  Leitura      │◄────── │  SELECT / JOIN / Agregações   │  │
+│  │  (SELECT)     │        └──────────────────────────────┘  │
+│  └───────────────┘                                           │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│                        API REST (Node.js)                    │
+│                  API REST + Dashboard (Node.js)              │
 │                                                              │
-│  GET /pedidos/:id          ┌──────────────────────────────┐ │
-│  GET /clientes/:id/pedidos │  MySQL REPLICA 1 (Read)      │ │
-│  GET /produtos/baixo-estoque──► Round-Robin               │ │
-│  GET /relatorios/vendas    │  MySQL REPLICA 2 (Read)      │ │
-│                            │  MySQL REPLICA N (Read)      │ │
-│                            └──────────────────────────────┘ │
+│  localhost:3000 (navegador)  ┌──────────────────────────┐  │
+│  GET /pedidos/:id            │  MySQL REPLICA 1 (Read)  │  │
+│  GET /clientes/:id/pedidos ──► Round-Robin              │  │
+│  GET /produtos/baixo-estoque │  MySQL REPLICA 2 (Read)  │  │
+│  GET /relatorios/vendas      │  MySQL REPLICA N (Read)  │  │
+│                              └──────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -73,44 +76,47 @@ Ambos os componentes se conectam ao mesmo banco MySQL (`aula-db`), porém atrav�
 
 ```
 Trabalho-com-Banco-de-Dados-Replicado/
+├── .github/
+│   └── copilot-instructions.md           # Contexto completo do projeto para IA
 ├── sql/
-│   └── schema.sql                        # DDL do banco de dados
+│   └── schema.sql                        # DDL das 4 tabelas
+├── docker/
+│   ├── init-primary.sql                  # Executado ao criar o container primário
+│   └── setup-replica.sh                  # Configura replicação entre containers
+├── docker-compose.yml                    # Sobe primário + réplica + setup
+├── testar-local.ps1                      # Script para teste local completo
 │
 ├── java-app/                             # Aplicação Java
 │   ├── pom.xml
-│   └── src/main/
-│       ├── java/com/replicacao/db/
-│       │   ├── Main.java                 # Ponto de entrada
-│       │   ├── config/
-│       │   │   └── AppConfig.java        # Leitura do config.properties
-│       │   ├── connection/
-│       │   │   └── ConnectionManager.java # Gerencia conexões write/read
-│       │   ├── model/
-│       │   │   ├── Cliente.java
-│       │   │   ├── Produto.java
-│       │   │   ├── Pedido.java
-│       │   │   └── PedidoItem.java
-│       │   ├── repository/
-│       │   │   ├── ClienteRepository.java
-│       │   │   ├── ProdutoRepository.java
-│       │   │   └── PedidoRepository.java
-│       │   └── service/
-│       │       └── DataGeneratorService.java
-│       └── resources/
-│           └── config.properties         # Configuração de hosts e ciclos
+│   ├── src/main/
+│   │   ├── java/com/replicacao/db/
+│   │   │   ├── Main.java                 # Ponto de entrada e loop de ciclos
+│   │   │   ├── config/AppConfig.java     # Lê config.properties (externo tem prioridade)
+│   │   │   ├── connection/ConnectionManager.java  # Gerencia conexões write/read
+│   │   │   ├── model/                    # Cliente, Produto, Pedido, PedidoItem
+│   │   │   ├── repository/               # ClienteRepository, ProdutoRepository, PedidoRepository
+│   │   │   └── service/DataGeneratorService.java  # Gera dados e executa consultas
+│   │   └── resources/
+│   │       └── config.properties         # Config embutida no JAR (fallback)
+│   └── target/
+│       ├── config.properties             # ← EDITE ESTE na apresentação (prioridade)
+│       ├── db-replicacao.jar
+│       └── libs/                         # Dependências (mysql-connector-j)
 │
 └── api-rest/                             # API REST em Node.js
     ├── package.json
     ├── .env.example                      # Template de variáveis de ambiente
+    ├── .env                              # ← EDITE ESTE na apresentação
     └── src/
-        ├── server.js                     # Bootstrap do servidor Express
-        ├── database/
-        │   └── replicaPool.js            # Gerencia pools de réplicas (round-robin)
-        └── routes/
-            ├── pedidos.js
-            ├── clientes.js
-            ├── produtos.js
-            └── relatorios.js
+        ├── server.js                     # Bootstrap Express + serve o dashboard
+        ├── database/replicaPool.js       # Pools de réplicas com round-robin
+        ├── routes/
+        │   ├── pedidos.js
+        │   ├── clientes.js
+        │   ├── produtos.js
+        │   └── relatorios.js
+        └── public/
+            └── index.html                # Dashboard visual (localhost:3000)
 ```
 
 ---
@@ -140,6 +146,8 @@ mysql -u root -p < sql/schema.sql
 | `pedido` | `id` | `cliente_id → cliente.id` |
 | `pedido_item` | `id` | `pedido_id → pedido.id`, `produto_id → produto.id` |
 
+> **Atenção:** o campo `criado_por` é `VARCHAR(50)` em todas as tabelas. O valor inserido é `"Gabriel Fillip e Leonardo Cassio"` (32 caracteres).
+
 ---
 
 ## Aplicação Java
@@ -149,42 +157,44 @@ mysql -u root -p < sql/schema.sql
 - Java 17+
 - Maven 3.8+
 
-### Configuração
+### Configuração dos hosts
 
-Edite o arquivo `java-app/src/main/resources/config.properties`:
+Existem três locais para o `config.properties`, em ordem de prioridade:
+
+| Prioridade | Arquivo | Quando usar |
+|---|---|---|
+| 1ª | `java-app/target/config.properties` | **Apresentação** — edite aqui sem recompilar |
+| 2ª | `java-app/target/classes/config.properties` | Gerado pelo Maven automaticamente |
+| 3ª | Embutido no JAR | Fallback se nenhum externo existir |
+
+**Na apresentação, edite apenas `java-app/target/config.properties`:**
 
 ```properties
-# Host primário (ESCRITA)
-db.write.host=<IP_DO_PROFESSOR>
+db.write.host=IP_DO_PROFESSOR
 db.write.port=3306
 db.write.database=aula-db
 db.write.username=root
-db.write.password=<SENHA>
+db.write.password=SENHA
 
-# Réplicas de leitura (READ) — separe por vírgula para múltiplas
-db.read.replicas=<IP_REPLICA_1>:3307,<IP_REPLICA_2>:3308
+db.read.replicas=IP_REPLICA:3307
 db.read.database=aula-db
 db.read.username=root
-db.read.password=<SENHA>
+db.read.password=SENHA
 
-# Intervalo entre ciclos (ms) e quantidade (0 = infinito)
 app.cycle.interval.ms=3000
 app.cycles=0
 ```
 
 ### Compilar e Executar
 
-```bash
+```powershell
+# Compilar (só necessário uma vez ou ao alterar o código)
 cd java-app
-
-# Compilar e empacotar
 mvn clean package -q
 
-# Executar (Linux/Mac)
-java -cp "target/db-replicacao.jar:target/libs/*" com.replicacao.db.Main
-
-# Executar (Windows — separador de classpath é ;)
-java -cp "target/db-replicacao.jar;target/libs/*" com.replicacao.db.Main
+# Executar a partir de target/ (usa o config.properties externo)
+cd target
+java -cp "db-replicacao.jar;libs/*" com.replicacao.db.Main
 ```
 
 ---
@@ -198,233 +208,204 @@ java -cp "target/db-replicacao.jar;target/libs/*" com.replicacao.db.Main
 
 ### Configuração
 
-```bash
-cd api-rest
-
-# Copie o template de configuração
-cp .env.example .env
-```
-
-Edite o `.env` com os dados das réplicas:
+Edite `api-rest/.env`:
 
 ```env
 PORT=3000
-
-# Múltiplas réplicas separadas por vírgula
-DB_READ_REPLICAS=<IP_REPLICA_1>:3307,<IP_REPLICA_2>:3308
+DB_READ_REPLICAS=IP_REPLICA:3307
 DB_DATABASE=aula-db
 DB_USERNAME=root
-DB_PASSWORD=<SENHA>
-
-# Produtos com estoque abaixo deste valor serão retornados como "baixo estoque"
+DB_PASSWORD=SENHA
 LOW_STOCK_THRESHOLD=10
 ```
 
-### Instalar Dependências e Executar
+### Executar
 
-```bash
+```powershell
 cd api-rest
-npm install
+npm install   # apenas na primeira vez
 npm start
 ```
+
+---
+
+## Dashboard Visual
+
+Acesse `http://localhost:3000` no navegador após iniciar a API REST.
+
+| Seção | Endpoint | Descrição |
+|---|---|---|
+| Buscar Pedido por ID | `GET /pedidos/:id` | Mostra pedido com cliente e itens |
+| Pedidos do Cliente | `GET /clientes/:id/pedidos` | Histórico completo do cliente |
+| Baixo Estoque | `GET /produtos/baixo-estoque` | Produtos críticos em vermelho |
+| Relatório de Vendas | `GET /relatorios/vendas` | KPIs + auto-refresh configurável |
+
+O botão **Auto-refresh** do relatório fica verde quando ativo e mostra o horário da última atualização — ideal para demonstrar dados sendo gerados em tempo real durante a apresentação.
 
 ---
 
 ## Teste Local com Docker
 
-Antes de apresentar ao professor, você pode testar tudo localmente simulando um ambiente real de replicação com Docker.
+Antes da apresentação, teste tudo localmente com Docker.
 
-### Pré-requisitos
+### Pré-requisito
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) instalado e rodando
 
-### Subir o ambiente completo (um comando)
+### Subir o ambiente
 
 ```powershell
-# No PowerShell, na raiz do projeto:
+# Na raiz do projeto:
 .\testar-local.ps1
 ```
 
-O script vai:
-1. Subir um **MySQL Primário** na porta `3306`
-2. Subir uma **MySQL Réplica** na porta `3307`
-3. Configurar a replicação automaticamente entre os dois
-4. Fazer um teste de escrita no primário e leitura na réplica para confirmar que está funcionando
-5. Exibir as instruções para rodar Java e Node.js
+O script sobe o primário (3306), a réplica (3307), configura a replicação e valida que está funcionando.
 
-Após o script terminar, o `config.properties` e o `.env` já estão apontando para `localhost:3306` (escrita) e `localhost:3307` (leitura) — não precisa alterar nada.
-
-### Comandos úteis durante os testes
+Ou manualmente:
 
 ```powershell
-# Ver logs do primário em tempo real
-docker logs -f mysql-primary
+docker compose up -d
+```
 
-# Ver logs da réplica em tempo real
-docker logs -f mysql-replica
+### Comandos úteis
 
-# Verificar se a replicação está ativa e sem erros
+```powershell
+# Verificar status da replicação
 docker exec mysql-replica mysql -uroot -proot -e "SHOW REPLICA STATUS\G"
 
-# Acessar o MySQL primário manualmente
+# Acessar o primário via MySQL
 docker exec -it mysql-primary mysql -uroot -proot aula-db
 
-# Acessar o MySQL réplica manualmente
+# Acessar a réplica via MySQL
 docker exec -it mysql-replica mysql -uroot -proot aula-db
 
-# Parar tudo (mantém os dados)
+# Parar (mantém dados)
 docker compose down
 
-# Parar e apagar os dados (começa do zero)
+# Parar e apagar dados
 docker compose down -v
 ```
 
-### O que verificar para confirmar que a replicação está funcionando
-
-No resultado do `SHOW REPLICA STATUS\G`, procure estas linhas:
+### O que verificar
 
 ```
 Replica_IO_Running: Yes     ← deve ser "Yes"
 Replica_SQL_Running: Yes    ← deve ser "Yes"
-Seconds_Behind_Source: 0    ← deve ser 0 (ou muito baixo)
-Last_Error:                 ← deve estar vazio
+Seconds_Behind_Source: 0    ← deve ser 0 ou muito baixo
+Last_IO_Error:              ← deve estar vazio
+```
+
+### Se a replicação parar
+
+```powershell
+docker exec mysql-replica mysql -uroot -proot -e "STOP REPLICA"
+docker exec mysql-replica mysql -uroot -proot -e "RESET REPLICA ALL"
+# Depois reconfigure com CHANGE REPLICATION SOURCE TO...
+docker exec mysql-replica mysql -uroot -proot -e "START REPLICA"
 ```
 
 ---
 
-## Como Executar
+## Como Executar na Apresentação
 
-### Passo a passo completo
+> O Docker **não é necessário** na apresentação — você conecta direto nos hosts do professor.
 
-**1. Criar o banco de dados:**
-```bash
-mysql -u root -p < sql/schema.sql
+**1. Editar os hosts (sem recompilar):**
+
+- `java-app/target/config.properties` → IPs do professor
+- `api-rest/.env` → IP da réplica do professor
+
+**2. Terminal 1 — Java:**
+```powershell
+cd java-app\target
+java -cp "db-replicacao.jar;libs/*" com.replicacao.db.Main
 ```
 
-**2. Configurar a aplicação Java** — edite `java-app/src/main/resources/config.properties` com os hosts fornecidos pelo professor.
-
-**3. Compilar e iniciar a aplicação Java** (gera dados continuamente):
-```bash
-cd java-app
-mvn clean package -q
-java -cp "target/db-replicacao.jar;target/libs/*" com.replicacao.db.Main
-```
-
-**4. Em outro terminal, configurar e iniciar a API REST:**
-```bash
+**3. Terminal 2 — API REST:**
+```powershell
 cd api-rest
-cp .env.example .env
-# edite o .env com os hosts corretos
-npm install
 npm start
 ```
+
+**4. Abrir no navegador:**
+```
+http://localhost:3000
+```
+
+> Se o banco do professor não tiver as tabelas criadas, execute antes:
+> ```powershell
+> mysql -h IP_DO_PROFESSOR -uroot -p < sql\schema.sql
+> ```
 
 ---
 
 ## Como Testar
 
-### Testando a API REST
-
-Com a aplicação Java rodando e gerando dados, teste os endpoints com `curl` ou qualquer cliente HTTP (Insomnia, Postman, etc.):
-
-**Buscar pedido por ID:**
-```bash
+```powershell
 curl http://localhost:3000/pedidos/1
-```
-
-**Buscar pedidos de um cliente:**
-```bash
 curl http://localhost:3000/clientes/1/pedidos
-```
-
-**Produtos com baixo estoque:**
-```bash
 curl http://localhost:3000/produtos/baixo-estoque
-```
-
-**Relatório de vendas:**
-```bash
 curl http://localhost:3000/relatorios/vendas
-```
-
-**Health check:**
-```bash
 curl http://localhost:3000/health
-```
-
-### Exemplo de resposta — `GET /relatorios/vendas`
-
-```json
-{
-  "resumo_geral": {
-    "total_pedidos": 42,
-    "total_vendido": "87450.30",
-    "media_por_pedido": "2082.15",
-    "menor_pedido": "349.90",
-    "maior_pedido": "9599.50"
-  },
-  "por_status": [
-    { "status": "FINALIZADO", "quantidade": 15, "total_valor": "32100.00" },
-    { "status": "APROVADO",   "quantidade": 12, "total_valor": "25400.00" }
-  ],
-  "top_5_produtos": [
-    { "id": 2, "descricao": "Mouse Logitech MX Master", "total_vendido": 38, "receita_total": "13296.20" }
-  ]
-}
 ```
 
 ---
 
 ## Fluxo de Ciclos
 
-A cada ciclo da aplicação Java ocorre o seguinte:
-
 ```
 FASE INICIAL (executada uma vez ao subir)
 ├── [WRITE → Primário] INSERT 5 clientes
 └── [WRITE → Primário] INSERT 10 produtos
+     └── Aguarda 2s para réplica sincronizar
 
 CICLO N (repetido indefinidamente)
 │
-├── [READ → Réplica]  SELECT clientes existentes   ← escolha aleatória
-├── [READ → Réplica]  SELECT produtos existentes   ← escolha aleatória
+├── [READ  → Réplica]  SELECT clientes → escolhe 1 aleatório
+├── [READ  → Réplica]  SELECT produtos → escolhe 1 a 3 aleatórios
 │
-├── [WRITE → Primário]
-│   ├── INSERT INTO pedido                         ← transação única
-│   └── INSERT INTO pedido_item (1 a 3 itens)
+├── [WRITE → Primário] INSERT pedido + itens (transação única)
+├── [WRITE → Primário] UPDATE pedido SET status = novo_status
+├── [WRITE → Primário] DELETE cliente sem pedidos (a cada 5 ciclos)
+│                      └── se todos tiverem pedidos: pula e avisa no console
 │
-└── [READ → Réplica]
-    ├── 4.1 SELECT pedido por ID (JOIN cliente)
-    ├── 4.2 SELECT itens do pedido (JOIN produto)
-    ├── 4.3 SELECT últimos 5 pedidos do cliente (ORDER BY id DESC LIMIT 5)
-    └── 4.4 SELECT COUNT(*) / AVG(valor_total) / SUM(valor_total)
+└── [READ  → Réplica]
+    ├── SELECT pedido por ID (JOIN cliente)
+    ├── SELECT itens do pedido (JOIN produto)
+    ├── SELECT últimos 5 pedidos do cliente
+    └── SELECT COUNT(*) / AVG(valor_total) / SUM(valor_total)
 ```
 
-O intervalo entre ciclos e a quantidade total são configuráveis em `config.properties` (`app.cycle.interval.ms` e `app.cycles`).
+---
+
+## Reiniciar os Dados do Zero
+
+Para zerar todos os pedidos, clientes e produtos e começar a contagem do início:
+
+```powershell
+docker compose down -v   # apaga os volumes com todos os dados
+docker compose up -d     # sobe tudo limpo
+```
+
+Aguarde ~30 segundos e rode a aplicação Java normalmente.
 
 ---
 
 ## Escalabilidade Horizontal
 
-### Aplicação Java
+Para adicionar réplicas, separe por vírgula em ambos os arquivos:
 
-Para adicionar réplicas, basta separar os endereços por vírgula em `config.properties`:
-
+**`config.properties`:**
 ```properties
-db.read.replicas=192.168.1.10:3307,192.168.1.11:3307,192.168.1.12:3307
+db.read.replicas=IP1:3307,IP2:3307,IP3:3307
 ```
 
-A classe `ConnectionManager` usa round-robin atômico (`AtomicInteger`) para distribuir as conexões de leitura entre todas as réplicas listadas, sem nenhuma alteração de código.
-
-### API REST
-
-Da mesma forma, adicione réplicas no `.env`:
-
+**`.env`:**
 ```env
-DB_READ_REPLICAS=192.168.1.10:3307,192.168.1.11:3307,192.168.1.12:3307
+DB_READ_REPLICAS=IP1:3307,IP2:3307,IP3:3307
 ```
 
-A classe `ReplicaPool` mantém um pool de conexões independente para cada réplica e distribui as queries em round-robin. Cada requisição HTTP pode ser atendida por uma réplica diferente, garantindo balanceamento de carga horizontal para leituras.
+Nenhuma alteração de código é necessária. O `ConnectionManager.java` e o `replicaPool.js` distribuem automaticamente as leituras em round-robin entre todas as réplicas listadas.
 
 ---
 
@@ -432,10 +413,11 @@ A classe `ReplicaPool` mantém um pool de conexões independente para cada répl
 
 | Método | Rota | Descrição |
 |---|---|---|
-| `GET` | `/pedidos/:id` | Busca pedido por ID com dados do cliente e itens |
-| `GET` | `/clientes/:id/pedidos` | Histórico completo de pedidos de um cliente |
-| `GET` | `/produtos/baixo-estoque` | Produtos com estoque abaixo do limiar configurado |
-| `GET` | `/relatorios/vendas` | Relatório com SUM, COUNT, AVG, top 5 produtos |
+| `GET` | `/` | Dashboard visual |
+| `GET` | `/pedidos/:id` | Pedido por ID com cliente e itens |
+| `GET` | `/clientes/:id/pedidos` | Histórico de pedidos de um cliente |
+| `GET` | `/produtos/baixo-estoque` | Produtos com estoque abaixo do limiar |
+| `GET` | `/relatorios/vendas` | SUM / COUNT / AVG + top 5 produtos |
 | `GET` | `/health` | Verificação de saúde da API |
 
 ---
@@ -448,4 +430,4 @@ A classe `ReplicaPool` mantém um pool de conexões independente para cada répl
 ### Node.js
 - **express 4.x** — framework HTTP
 - **mysql2 3.x** — driver MySQL com suporte a Promises e pool de conexões
-- **dotenv 16.x** — carregamento de variáveis de ambiente a partir do arquivo `.env`
+- **dotenv 16.x** — carregamento de variáveis de ambiente

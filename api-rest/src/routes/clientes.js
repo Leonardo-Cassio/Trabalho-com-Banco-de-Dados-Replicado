@@ -27,7 +27,7 @@ router.get('/:id/pedidos', async (req, res) => {
     }
 
     const pedidos = await db.query(
-      `SELECT p.id, p.valor_total, p.status, p.criado_em,
+      `SELECT p.id, p.valor_total, p.status, p.criado_em, p.criado_por,
               COUNT(pi.id) AS total_itens
        FROM pedido p
        LEFT JOIN pedido_item pi ON pi.pedido_id = p.id

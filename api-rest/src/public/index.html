@@ -67,8 +67,9 @@
       gap: 20px;
       max-width: 1100px;
       margin: 0 auto;
-      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+      grid-template-columns: repeat(2, 1fr);
     }
+    .card-full { grid-column: 1 / -1; }
 
     /* ── Card ── */
     .card {
@@ -306,29 +307,8 @@
     </div>
   </div>
 
-  <!-- ── 3. Baixo estoque ── -->
-  <div class="card">
-    <div class="card-header">
-      <div class="card-icon icon-yellow">⚠️</div>
-      <div>
-        <h2>Produtos com Baixo Estoque</h2>
-        <div style="font-size:.72rem;color:var(--muted)">GET /produtos/baixo-estoque</div>
-      </div>
-      <span class="method">GET</span>
-    </div>
-    <div class="card-body">
-      <div class="input-row">
-        <button onclick="buscarBaixoEstoque()">Carregar</button>
-        <button class="secondary" onclick="limpar('result-estoque')">Limpar</button>
-      </div>
-      <div class="result" id="result-estoque">
-        <div class="result-empty">Clique em Carregar</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── 4. Relatório de vendas ── -->
-  <div class="card">
+  <!-- ── 3. Relatório de vendas ── -->
+  <div class="card card-full">
     <div class="card-header">
       <div class="card-icon icon-green">📊</div>
       <div>
@@ -340,7 +320,7 @@
     <div class="card-body">
       <div class="toolbar">
         <button onclick="buscarRelatorio()">Carregar</button>
-        <button class="secondary" onclick="toggleAutoRefresh()">⟳ Auto-refresh</button>
+        <button id="btn-autorefresh" class="secondary" onclick="toggleAutoRefresh()">⟳ Auto-refresh</button>
         <label>a cada</label>
         <select id="refresh-interval">
           <option value="3000">3s</option>
@@ -349,6 +329,7 @@
         </select>
         <span id="refresh-status" style="font-size:.75rem;color:var(--muted)"></span>
       </div>
+      <div id="last-updated" style="font-size:.72rem;color:var(--muted);margin-bottom:8px;min-height:16px"></div>
       <div id="kpis-relatorio"></div>
       <div class="result" id="result-relatorio">
         <div class="result-empty">Clique em Carregar</div>
@@ -419,6 +400,7 @@
             <tr><td>Status</td><td>${statusBadge(d.status)}</td></tr>
             <tr><td>Valor Total</td><td class="currency">${brl(d.valor_total)}</td></tr>
             <tr><td>Criado em</td><td>${new Date(d.criado_em).toLocaleString('pt-BR')}</td></tr>
+            <tr><td>Criado por</td><td>${d.criado_por}</td></tr>
           </tbody>
         </table>
         <div style="padding:8px 12px 4px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Itens do Pedido</div>
@@ -441,51 +423,22 @@
       </div>`;
 
       const lista = table(
-        ['ID', 'Status', 'Valor Total', 'Itens', 'Criado em'],
+        ['ID', 'Status', 'Valor Total', 'Itens', 'Criado em', 'Criado por'],
         d.pedidos,
         p => `
           <td>${p.id}</td>
           <td>${statusBadge(p.status)}</td>
           <td class="currency">${brl(p.valor_total)}</td>
           <td>${p.total_itens}</td>
-          <td>${new Date(p.criado_em).toLocaleString('pt-BR')}</td>`
+          <td>${new Date(p.criado_em).toLocaleString('pt-BR')}</td>
+          <td>${p.criado_por}</td>`
       );
 
       document.getElementById('result-cliente').innerHTML = info + lista;
     } catch (e) { erro('result-cliente', e.message); }
   }
 
-  // ── 3. Baixo estoque ─────────────────────────────────────────────
-  async function buscarBaixoEstoque() {
-    loading('result-estoque');
-    try {
-      const d = await api('/produtos/baixo-estoque');
-      if (d.erro) { erro('result-estoque', d.erro); return; }
-
-      const info = `<div style="padding:10px 14px;font-size:.8rem;border-bottom:1px solid var(--border)">
-        Limiar de estoque: <strong>${d.limiar_estoque}</strong> unidades
-        &nbsp;|&nbsp; Produtos críticos: <strong style="color:var(--red)">${d.total}</strong>
-      </div>`;
-
-      const lista = table(
-        ['ID', 'Produto', 'Categoria', 'Preço', 'Estoque'],
-        d.produtos,
-        p => {
-          const cor = p.estoque <= 5 ? 'var(--red)' : 'var(--yellow)';
-          return `
-            <td>${p.id}</td>
-            <td>${p.descricao}</td>
-            <td>${p.categoria}</td>
-            <td class="currency">${brl(p.valor)}</td>
-            <td style="color:${cor};font-weight:700">${p.estoque}</td>`;
-        }
-      );
-
-      document.getElementById('result-estoque').innerHTML = info + lista;
-    } catch (e) { erro('result-estoque', e.message); }
-  }
-
-  // ── 4. Relatório de vendas ────────────────────────────────────────
+  // ── 3. Relatório de vendas ────────────────────────────────────────
   async function buscarRelatorio() {
     loading('result-relatorio');
     document.getElementById('kpis-relatorio').innerHTML = '';
@@ -538,6 +491,9 @@
         ${porStatus}
         <div style="padding:8px 12px 4px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Top 5 Produtos</div>
         ${topProdutos}`;
+
+      document.getElementById('last-updated').textContent =
+        '↻ Atualizado em: ' + new Date().toLocaleTimeString('pt-BR');
     } catch (e) { erro('result-relatorio', e.message); }
   }
 
@@ -546,17 +502,21 @@
 
   function toggleAutoRefresh() {
     const statusEl = document.getElementById('refresh-status');
+    const btnEl    = document.getElementById('btn-autorefresh');
     if (refreshTimer) {
       clearInterval(refreshTimer);
       refreshTimer = null;
       statusEl.textContent = '';
-      statusEl.style.color = 'var(--muted)';
+      btnEl.style.background = '';
+      btnEl.style.color = '';
     } else {
       const ms = Number(document.getElementById('refresh-interval').value);
       buscarRelatorio();
       refreshTimer = setInterval(buscarRelatorio, ms);
       statusEl.textContent = '● ativo';
       statusEl.style.color = 'var(--green)';
+      btnEl.style.background = '#14532d';
+      btnEl.style.color = '#86efac';
     }
   }
 

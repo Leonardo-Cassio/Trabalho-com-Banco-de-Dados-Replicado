@@ -18,7 +18,7 @@ import java.util.*;
  */
 public class DataGeneratorService {
 
-    private static final String CRIADO_POR = "Fillip e Cassio"; // max varchar(30)
+    private static final String CRIADO_POR = "Gabriel Fillip e Leonardo Cassio";
 
     private static final String[] NOMES = {
             "Ana Silva", "Bruno Costa", "Carla Souza", "Diego Pereira", "Eduarda Lima",
@@ -234,17 +234,11 @@ public class DataGeneratorService {
         System.out.println(" REMOÇÃO DE CLIENTE  [WRITE → Primário]");
         System.out.println("========================================");
 
-        // Busca na réplica um cliente que não tem pedidos (seguro para deletar)
         var candidato = clienteRepo.buscarClienteSemPedidos();
 
         if (candidato.isEmpty()) {
-            // Todos os clientes têm pedidos: insere um temporário só para demonstrar o DELETE
-            String nome  = "Cliente Temporário";
-            String email = "temp." + System.currentTimeMillis() + "@email.com";
-            Cliente temp = new Cliente(nome, email, CRIADO_POR);
-            clienteRepo.inserir(temp);
-            System.out.printf("  [INSERT] Nenhum cliente sem pedidos — criado cliente temporário (ID %d)%n", temp.getId());
-            candidato = java.util.Optional.of(temp);
+            System.out.println("  [SKIP] Todos os clientes possuem pedidos — DELETE ignorado neste ciclo.");
+            return;
         }
 
         Cliente alvo = candidato.get();
