@@ -1,5 +1,6 @@
 # Java
 java-app/target/
+!java-app/target/config.properties
 
 # Node.js
 api-rest/node_modules/
