@@ -18,7 +18,7 @@ import java.util.*;
  */
 public class DataGeneratorService {
 
-    private static final String CRIADO_POR = "Gabriel Fillip e Leonardo Cassio";
+    private static final String CRIADO_POR = "Leo Cassio e GabrielF";
 
     private static final String[] NOMES = {
             "Ana Silva", "Bruno Costa", "Carla Souza", "Diego Pereira", "Eduarda Lima",

@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS cliente (
     nome       VARCHAR(80)  NOT NULL,
     email      VARCHAR(120) NOT NULL,
     criado_em  DATETIME     DEFAULT NOW(),
-    criado_por VARCHAR(50)  NOT NULL,
+    criado_por VARCHAR(30)  NOT NULL,
     PRIMARY KEY (id),
     UNIQUE (email)
 );
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS produto (
     valor      NUMERIC(15, 2) NOT NULL,
     estoque    INT            NOT NULL,
     criado_em  DATETIME       DEFAULT NOW(),
-    criado_por VARCHAR(50)    NOT NULL,
+    criado_por VARCHAR(30)    NOT NULL,
     PRIMARY KEY (id)
 );
 
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS pedido (
     valor_total NUMERIC(15, 2) NOT NULL,
     status      VARCHAR(20)    NOT NULL,
     criado_em   DATETIME       DEFAULT NOW(),
-    criado_por  VARCHAR(50)    NOT NULL,
+    criado_por  VARCHAR(30)    NOT NULL,
     PRIMARY KEY (id),
     FOREIGN KEY (cliente_id) REFERENCES cliente (id)
 );
