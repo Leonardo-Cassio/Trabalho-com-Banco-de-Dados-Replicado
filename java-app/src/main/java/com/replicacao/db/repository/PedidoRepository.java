@@ -9,6 +9,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * REPOSITÓRIO DE PEDIDOS
+ *
+ * Responsável por todas as operações de banco de dados das tabelas `pedido` e `pedido_item`.
+ * Aplica a regra de separação leitura/escrita:
+ *   - Escrita (INSERT, UPDATE) → cm.getWriteConnection()  → host primário
+ *   - Leitura (SELECT)         → cm.getReadConnection()   → réplica
+ *
+ * Chamado por: DataGeneratorService (criar pedido, atualizar status, consultas)
+ *              API REST via routes/pedidos.js e routes/clientes.js (somente leitura)
+ */
 public class PedidoRepository {
 
     private final ConnectionManager cm;
@@ -18,16 +29,28 @@ public class PedidoRepository {
     }
 
     /**
-     * Insere pedido e seus itens no host primário dentro de uma única transação.
+     * Insere um pedido e todos os seus itens no host PRIMÁRIO em uma única transação.
+     * Chamado por DataGeneratorService.criarPedido() a cada ciclo.
+     *
+     * Por que transação única?
+     *   Garante que pedido e itens sejam gravados juntos — se a inserção de qualquer
+     *   item falhar, o pedido inteiro é desfeito (rollback), evitando dados inconsistentes.
+     *
+     * Fluxo:
+     *   1. Desabilita autocommit (conn.setAutoCommit(false))
+     *   2. INSERT INTO pedido → captura o ID gerado
+     *   3. Para cada item: INSERT INTO pedido_item com o pedido_id recém-gerado
+     *   4. conn.commit() confirma tudo de uma vez
+     *   5. Em caso de erro: conn.rollback() desfaz tudo
      */
     public Pedido inserirComItens(Pedido pedido) throws SQLException {
         String sqlPedido = "INSERT INTO pedido (cliente_id, valor_total, status, criado_por) VALUES (?, ?, ?, ?)";
         String sqlItem   = "INSERT INTO pedido_item (pedido_id, produto_id, quantidade, valor_unitario) VALUES (?, ?, ?, ?)";
 
-        try (Connection conn = cm.getWriteConnection()) {
+        try (Connection conn = cm.getWriteConnection()) {                              // [WRITE → Primário]
             conn.setAutoCommit(false);
             try {
-                // Insere pedido
+                // Insere o pedido e recupera o ID gerado pelo AUTO_INCREMENT
                 try (PreparedStatement ps = conn.prepareStatement(sqlPedido, Statement.RETURN_GENERATED_KEYS)) {
                     ps.setInt(1, pedido.getClienteId());
                     ps.setBigDecimal(2, pedido.getValorTotal());
@@ -39,7 +62,7 @@ public class PedidoRepository {
                     }
                 }
 
-                // Insere itens
+                // Insere cada item associando ao ID do pedido recém-criado
                 for (PedidoItem item : pedido.getItens()) {
                     item.setPedidoId(pedido.getId());
                     try (PreparedStatement ps = conn.prepareStatement(sqlItem, Statement.RETURN_GENERATED_KEYS)) {
@@ -54,16 +77,22 @@ public class PedidoRepository {
                     }
                 }
 
-                conn.commit();
+                conn.commit(); // confirma pedido + todos os itens de uma vez
             } catch (SQLException e) {
-                conn.rollback();
+                conn.rollback(); // erro em qualquer item → desfaz o pedido inteiro
                 throw e;
             }
         }
         return pedido;
     }
 
-    /** SELECT na réplica — busca pedido por ID. */
+    /**
+     * Busca um pedido por ID na RÉPLICA, fazendo JOIN com a tabela cliente.
+     * Chamado por DataGeneratorService.executarConsultas() e pela API REST (GET /pedidos/:id).
+     *
+     * O JOIN traz nome e e-mail do cliente sem precisar de uma segunda consulta.
+     * Retorna Optional.empty() se o ID não existir.
+     */
     public Optional<Pedido> buscarPorId(int id) throws SQLException {
         String sql = """
                 SELECT p.id, p.cliente_id, c.nome AS cliente_nome,
@@ -72,7 +101,7 @@ public class PedidoRepository {
                 JOIN cliente c ON c.id = p.cliente_id
                 WHERE p.id = ?
                 """;
-        try (Connection conn = cm.getReadConnection();
+        try (Connection conn = cm.getReadConnection();                                 // [READ → Réplica]
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, id);
@@ -92,7 +121,12 @@ public class PedidoRepository {
         return Optional.empty();
     }
 
-    /** SELECT na réplica — busca itens de um pedido. */
+    /**
+     * Busca os itens de um pedido na RÉPLICA, fazendo JOIN com a tabela produto.
+     * Chamado por DataGeneratorService.executarConsultas() logo após criarPedido().
+     *
+     * O JOIN com `produto` traz a descrição do produto sem consulta adicional.
+     */
     public List<PedidoItem> buscarItensDoPedido(int pedidoId) throws SQLException {
         List<PedidoItem> itens = new ArrayList<>();
         String sql = """
@@ -102,7 +136,7 @@ public class PedidoRepository {
                 JOIN produto pr ON pr.id = pi.produto_id
                 WHERE pi.pedido_id = ?
                 """;
-        try (Connection conn = cm.getReadConnection();
+        try (Connection conn = cm.getReadConnection();                                 // [READ → Réplica]
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, pedidoId);
@@ -121,7 +155,11 @@ public class PedidoRepository {
         return itens;
     }
 
-    /** SELECT na réplica — últimos N pedidos de um cliente. */
+    /**
+     * Busca os últimos N pedidos de um cliente na RÉPLICA.
+     * Chamado por DataGeneratorService.executarConsultas() para mostrar histórico.
+     * O parâmetro `limite` controla quantos pedidos são retornados (ex: 5).
+     */
     public List<Pedido> historicoPorCliente(int clienteId, int limite) throws SQLException {
         List<Pedido> lista = new ArrayList<>();
         String sql = """
@@ -131,7 +169,7 @@ public class PedidoRepository {
                 ORDER BY id DESC
                 LIMIT ?
                 """;
-        try (Connection conn = cm.getReadConnection();
+        try (Connection conn = cm.getReadConnection();                                 // [READ → Réplica]
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, clienteId);
@@ -152,7 +190,13 @@ public class PedidoRepository {
         return lista;
     }
 
-    /** SELECT na réplica — relatório agregado de vendas. */
+    /**
+     * Executa um relatório agregado na RÉPLICA e imprime no console.
+     * Chamado por DataGeneratorService.executarConsultas() ao final de cada ciclo.
+     *
+     * Demonstra o uso de funções de agregação (COUNT, AVG, SUM) — operações
+     * típicas de relatórios que devem ir à réplica para não sobrecarregar o primário.
+     */
     public void exibirRelatorioAgregado() throws SQLException {
         String sql = """
                 SELECT
@@ -161,7 +205,7 @@ public class PedidoRepository {
                     SUM(valor_total)   AS total_vendido
                 FROM pedido
                 """;
-        try (Connection conn = cm.getReadConnection();
+        try (Connection conn = cm.getReadConnection();                                 // [READ → Réplica]
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
 
@@ -174,12 +218,15 @@ public class PedidoRepository {
     }
 
     /**
-     * UPDATE no host primário — altera o status de um pedido.
-     * Retorna true se alguma linha foi afetada.
+     * Atualiza o status de um pedido no host PRIMÁRIO.
+     * Chamado por DataGeneratorService.atualizarStatusPedido() a cada ciclo,
+     * logo após a criação do pedido — demonstra o UPDATE com replicação.
+     *
+     * Retorna true se alguma linha foi afetada (pedido encontrado e atualizado).
      */
     public boolean atualizarStatus(int pedidoId, String novoStatus) throws SQLException {
         String sql = "UPDATE pedido SET status = ? WHERE id = ?";
-        try (Connection conn = cm.getWriteConnection();
+        try (Connection conn = cm.getWriteConnection();                                // [WRITE → Primário]
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, novoStatus);
@@ -188,7 +235,10 @@ public class PedidoRepository {
         }
     }
 
-    /** SELECT na réplica — todos os pedidos de um cliente com seus itens. */
+    /**
+     * Busca todos os pedidos de um cliente na RÉPLICA, ordenados do mais recente ao mais antigo.
+     * Chamado pela API REST (GET /clientes/:id/pedidos) via routes/clientes.js.
+     */
     public List<Pedido> buscarPorClienteId(int clienteId) throws SQLException {
         List<Pedido> lista = new ArrayList<>();
         String sql = """
@@ -197,7 +247,7 @@ public class PedidoRepository {
                 WHERE cliente_id = ?
                 ORDER BY id DESC
                 """;
-        try (Connection conn = cm.getReadConnection();
+        try (Connection conn = cm.getReadConnection();                                 // [READ → Réplica]
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, clienteId);
