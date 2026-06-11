@@ -9,14 +9,15 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * REPOSITÓRIO DE CLIENTES
+ * Repositório de clientes — encapsula todos os SQLs da tabela "cliente".
  *
- * Responsável por todas as operações de banco de dados relacionadas à tabela `cliente`.
- * Aplica a regra de separação leitura/escrita:
- *   - Escrita (INSERT, DELETE) → cm.getWriteConnection()  → host primário
- *   - Leitura (SELECT)         → cm.getReadConnection()   → réplica
+ * REGRA DE OURO:
+ *   Métodos que MODIFICAM dados → cm.getWriteConnection() → vai ao PRIMÁRIO
+ *   Métodos que LEEM dados      → cm.getReadConnection()  → vai à RÉPLICA
  *
- * Chamado por: DataGeneratorService (para cadastrar, listar e deletar clientes)
+ * Essa separação é feita por convenção: INSERT/UPDATE/DELETE usam write,
+ * SELECT usa read. O ConnectionManager não impede o uso errado — é
+ * responsabilidade do desenvolvedor chamar o método correto.
  */
 public class ClienteRepository {
 
@@ -27,15 +28,16 @@ public class ClienteRepository {
     }
 
     /**
-     * Insere um novo cliente no host PRIMÁRIO.
-     * Chamado por DataGeneratorService.cadastrarClientes() na fase inicial.
+     * INSERT no host PRIMÁRIO.
+     * Abre a conexão de escrita, executa o INSERT e captura o ID gerado
+     * pelo auto_increment do MySQL via getGeneratedKeys().
      *
-     * RETURN_GENERATED_KEYS faz o JDBC devolver o ID gerado pelo AUTO_INCREMENT,
-     * que é salvo no objeto cliente para uso posterior.
+     * try-with-resources garante que a conexão e o statement são fechados
+     * mesmo se ocorrer uma exceção — evita vazamento de conexões.
      */
     public Cliente inserir(Cliente cliente) throws SQLException {
         String sql = "INSERT INTO cliente (nome, email, criado_por) VALUES (?, ?, ?)";
-        try (Connection conn = cm.getWriteConnection();                                // [WRITE → Primário]
+        try (Connection conn = cm.getWriteConnection();
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
 
             ps.setString(1, cliente.getNome());
@@ -43,7 +45,7 @@ public class ClienteRepository {
             ps.setString(3, cliente.getCriadoPor());
             ps.executeUpdate();
 
-            // Recupera o ID gerado pelo banco e armazena no objeto
+            // Recupera o ID gerado pelo banco após o INSERT
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (rs.next()) cliente.setId(rs.getInt(1));
             }
@@ -52,16 +54,14 @@ public class ClienteRepository {
     }
 
     /**
-     * Busca todos os clientes na RÉPLICA.
-     * Chamado por DataGeneratorService.criarPedido() para escolher um cliente aleatório.
-     *
-     * Se a réplica ainda não sincronizou (lag), pode retornar lista vazia logo após
-     * a inserção inicial — por isso Main.java espera 2 segundos antes do primeiro ciclo.
+     * SELECT na RÉPLICA — retorna todos os clientes ordenados por ID.
+     * Usado pelo DataGeneratorService para escolher um cliente aleatório
+     * na hora de criar um pedido.
      */
     public List<Cliente> listarTodos() throws SQLException {
         List<Cliente> lista = new ArrayList<>();
         String sql = "SELECT id, nome, email, criado_em, criado_por FROM cliente ORDER BY id";
-        try (Connection conn = cm.getReadConnection();                                 // [READ → Réplica]
+        try (Connection conn = cm.getReadConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
 
@@ -79,12 +79,14 @@ public class ClienteRepository {
     }
 
     /**
-     * Busca na RÉPLICA um cliente que NÃO tenha nenhum pedido associado.
-     * Usado por DataGeneratorService.removerClienteAntigo() para encontrar
-     * um candidato seguro para DELETE — evita erro de chave estrangeira (FK).
+     * SELECT na RÉPLICA — retorna o primeiro cliente que NÃO tem nenhum pedido.
      *
-     * O LEFT JOIN com a tabela `pedido` retorna NULL em pedido.id para clientes
-     * sem pedidos. A cláusula WHERE p.id IS NULL filtra apenas esses casos.
+     * O LEFT JOIN com a tabela pedido traz todos os clientes; o WHERE p.id IS NULL
+     * filtra apenas os que não têm nenhum registro na tabela pedido.
+     * Isso garante que o DELETE subsequente não vai violar a foreign key
+     * (pedido.cliente_id → cliente.id).
+     *
+     * Retorna Optional.empty() se todos os clientes já tiverem pedidos.
      */
     public Optional<Cliente> buscarClienteSemPedidos() throws SQLException {
         String sql = """
@@ -95,7 +97,7 @@ public class ClienteRepository {
                 ORDER BY c.id ASC
                 LIMIT 1
                 """;
-        try (Connection conn = cm.getReadConnection();                                 // [READ → Réplica]
+        try (Connection conn = cm.getReadConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
 
@@ -109,20 +111,23 @@ public class ClienteRepository {
                 return Optional.of(c);
             }
         }
-        return Optional.empty(); // todos os clientes têm pedidos — DELETE será pulado
+        // Retorna vazio se nenhum cliente sem pedidos foi encontrado.
+        // O chamador (DataGeneratorService) decide o que fazer nesse caso.
+        return Optional.empty();
     }
 
     /**
-     * Deleta um cliente pelo ID no host PRIMÁRIO.
-     * Chamado por DataGeneratorService.removerClienteAntigo() a cada 5 ciclos.
-     * Só deve ser chamado após confirmar via buscarClienteSemPedidos() que
-     * não há pedidos vinculados — caso contrário MySQL lança erro de FK.
+     * DELETE no host PRIMÁRIO — remove o cliente pelo ID.
      *
-     * Retorna true se alguma linha foi removida, false caso o ID não exista.
+     * IMPORTANTE: só deve ser chamado para clientes sem pedidos,
+     * pois pedido tem foreign key para cliente. Chamar para um cliente
+     * com pedidos causa SQLException por violação de integridade referencial.
+     *
+     * Retorna true se a linha foi removida, false se o ID não existia.
      */
     public boolean deletar(int id) throws SQLException {
         String sql = "DELETE FROM cliente WHERE id = ?";
-        try (Connection conn = cm.getWriteConnection();                                // [WRITE → Primário]
+        try (Connection conn = cm.getWriteConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, id);
@@ -130,13 +135,10 @@ public class ClienteRepository {
         }
     }
 
-    /**
-     * Busca um cliente pelo ID na RÉPLICA.
-     * Disponível para uso futuro ou consultas pontuais.
-     */
+    /** SELECT na RÉPLICA — retorna um cliente pelo ID. */
     public Optional<Cliente> buscarPorId(int id) throws SQLException {
         String sql = "SELECT id, nome, email, criado_em, criado_por FROM cliente WHERE id = ?";
-        try (Connection conn = cm.getReadConnection();                                 // [READ → Réplica]
+        try (Connection conn = cm.getReadConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, id);

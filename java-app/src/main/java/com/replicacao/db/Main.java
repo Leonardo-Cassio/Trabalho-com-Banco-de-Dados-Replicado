@@ -9,19 +9,23 @@ import com.replicacao.db.repository.ProdutoRepository;
 import com.replicacao.db.service.DataGeneratorService;
 
 /**
- * PONTO DE ENTRADA DA APLICAÇÃO
+ * Ponto de entrada da aplicação Java.
  *
- * Esta classe inicia e controla o ciclo de vida da demonstração de replicação.
- * Ela não acessa o banco diretamente — delega tudo ao DataGeneratorService,
- * que por sua vez usa os repositories (ClienteRepository, ProdutoRepository,
- * PedidoRepository), que usam o ConnectionManager para separar leitura e escrita.
+ * RESPONSABILIDADE:
+ *   Orquestra o ciclo contínuo de geração de dados, demonstrando
+ *   na prática a separação entre host de escrita (primário) e hosts
+ *   de leitura (réplicas).
  *
  * FLUXO GERAL:
- *   1. AppConfig carrega o config.properties (hosts, portas, credenciais)
- *   2. ConnectionManager prepara as URLs JDBC do primário e das réplicas
- *   3. Fase inicial: insere clientes e produtos no PRIMÁRIO
- *   4. Aguarda 2 segundos para a réplica sincronizar (evitar lag na primeira leitura)
- *   5. Loop infinito: a cada ciclo executa INSERT + UPDATE + (DELETE a cada 5) + SELECTs
+ *   1. Lê as configurações (IPs, portas, credenciais) do config.properties
+ *   2. Cria os repositórios — cada um recebe o ConnectionManager para
+ *      saber onde escrever e onde ler
+ *   3. Fase inicial: insere clientes e produtos UMA ÚNICA VEZ no primário
+ *   4. Loop infinito:
+ *        a) INSERT pedido + itens     → primário  (escrita)
+ *        b) UPDATE status do pedido   → primário  (escrita)
+ *        c) DELETE cliente (ciclo %5) → primário  (escrita)
+ *        d) SELECT consultas 4.1–4.4  → réplica   (leitura)
  */
 public class Main {
 
@@ -31,72 +35,68 @@ public class Main {
         System.out.println("║   Gabriel Fillip e Leonardo Cassio            ║");
         System.out.println("╚══════════════════════════════════════════════╝");
 
-        // AppConfig lê o config.properties — primeiro busca o arquivo externo
-        // ao lado do JAR (target/config.properties), depois o embutido no JAR.
+        // Carrega config.properties (externo ao lado do JAR tem prioridade;
+        // se não existir, usa o embutido dentro do JAR)
         AppConfig config = new AppConfig();
 
-        // ConnectionManager recebe a config e prepara as conexões JDBC.
-        // Escrita → host primário | Leitura → réplicas em round-robin.
+        // ConnectionManager é o único ponto que sabe os IPs de escrita e leitura.
+        // Todos os repositórios recebem esse objeto e chamam getWriteConnection()
+        // ou getReadConnection() conforme a operação.
         ConnectionManager cm = new ConnectionManager(config);
 
-        // Repositories recebem o ConnectionManager e usam getWriteConnection()
-        // ou getReadConnection() conforme a operação (INSERT/UPDATE/DELETE vs SELECT).
+        // Repositórios — encapsulam os SQLs de cada entidade.
+        // Recebem o mesmo ConnectionManager, mas cada método escolhe
+        // internamente se vai ao primário ou à réplica.
         ClienteRepository clienteRepo = new ClienteRepository(cm);
         ProdutoRepository produtoRepo  = new ProdutoRepository(cm);
         PedidoRepository  pedidoRepo   = new PedidoRepository(cm);
 
-        // DataGeneratorService orquestra a geração de dados aleatórios.
-        // Ele não sabe se é primário ou réplica — isso é responsabilidade dos repositories.
+        // Serviço que gera os dados aleatórios e coordena as operações
         DataGeneratorService service = new DataGeneratorService(clienteRepo, produtoRepo, pedidoRepo);
 
         try {
-            // ── FASE INICIAL ──────────────────────────────────────────────────────
-            // Insere 5 clientes e 10 produtos no primário UMA VEZ ao iniciar.
-            // Esses dados ficam disponíveis em todos os ciclos posteriores.
-            service.cadastrarClientes(5);  // [WRITE → Primário] INSERT INTO cliente
-            service.cadastrarProdutos();   // [WRITE → Primário] INSERT INTO produto
+            // ── FASE INICIAL ─────────────────────────────────────────
+            // Inserções feitas apenas uma vez ao iniciar a aplicação.
+            // Sem esses dados no primário não há o que selecionar nas réplicas.
+            service.cadastrarClientes(5);
+            service.cadastrarProdutos();
 
-            // Pausa necessária porque a réplica MySQL tem um pequeno atraso (replication lag)
-            // para receber os dados recém-inseridos no primário.
-            // Sem esse sleep, a primeira leitura na réplica retornaria vazio.
+            // Aguarda a réplica sincronizar os dados recém-inseridos.
+            // A replicação é assíncrona; sem essa pausa os primeiros SELECTs
+            // na réplica podem retornar vazio (lag de replicação).
             System.out.println("\n>>> Aguardando replicação sincronizar (2s)...");
             Thread.sleep(2000);
 
-            // ── LOOP PRINCIPAL ────────────────────────────────────────────────────
-            int ciclo    = 0;
-            int maxCiclos = config.getCycles(); // 0 = roda infinitamente
+            int ciclo     = 0;
+            int maxCiclos = config.getCycles(); // 0 = infinito
 
             System.out.println(">>> Iniciando ciclos de pedidos. Pressione Ctrl+C para parar.");
 
+            // ── LOOP PRINCIPAL ────────────────────────────────────────
             while (maxCiclos == 0 || ciclo < maxCiclos) {
                 ciclo++;
                 System.out.printf("%n╔══════════ CICLO %-4d ══════════╗%n", ciclo);
 
-                // [WRITE → Primário] INSERT pedido + pedido_item (transação única)
-                // Internamente, criarPedido() lê clientes e produtos da RÉPLICA antes de inserir.
+                // ESCRITA 1 — INSERT pedido e seus itens no primário
                 Pedido pedido = service.criarPedido();
 
-                // [WRITE → Primário] UPDATE pedido SET status = próximo_status
-                // Demonstra que atualizações também vão ao primário e se replicam.
+                // ESCRITA 2 — UPDATE: avança o status do pedido recém-criado no primário.
+                // Demonstra que operações de escrita (inclusive UPDATE) vão ao primário.
                 service.atualizarStatusPedido(pedido);
 
-                // [WRITE → Primário] DELETE FROM cliente WHERE id = ?
-                // Executado a cada 5 ciclos para demonstrar DELETE com replicação.
-                // Se todos os clientes tiverem pedidos, o DELETE é pulado com mensagem [SKIP].
+                // ESCRITA 3 — DELETE: a cada 5 ciclos remove um cliente sem pedidos.
+                // Usa a réplica para ENCONTRAR o candidato (SELECT) e o primário
+                // para EXECUTAR a remoção (DELETE) — demonstra os dois fluxos.
                 if (ciclo % 5 == 0) {
                     service.removerClienteAntigo();
                 }
 
-                // [READ → Réplica] Série de SELECTs que demonstram a leitura via réplica:
-                //   - buscarPorId (JOIN pedido + cliente)
-                //   - buscarItensDoPedido (JOIN pedido_item + produto)
-                //   - historicoPorCliente (últimos 5 pedidos)
-                //   - exibirRelatorioAgregado (COUNT / AVG / SUM)
+                // LEITURA — todas as consultas 4.1 a 4.4 usam SOMENTE a réplica
                 service.executarConsultas(pedido);
 
                 System.out.printf("╚═════════ Fim Ciclo %-4d ════════╝%n", ciclo);
 
-                // Intervalo configurável entre ciclos (padrão: 3000ms = 3 segundos)
+                // Pausa configurável entre ciclos (app.cycle.interval.ms no config)
                 if (maxCiclos == 0 || ciclo < maxCiclos) {
                     Thread.sleep(config.getCycleIntervalMs());
                 }
@@ -105,6 +105,7 @@ public class Main {
             System.out.println("\nAplicação finalizada após " + ciclo + " ciclo(s).");
 
         } catch (InterruptedException e) {
+            // Ctrl+C ou Thread.interrupt() — encerramento limpo sem stack trace
             System.out.println("\nAplicação interrompida pelo usuário.");
             Thread.currentThread().interrupt();
         } catch (Exception e) {
