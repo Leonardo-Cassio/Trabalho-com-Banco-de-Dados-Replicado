@@ -58,7 +58,7 @@ public class Main {
             // ── FASE INICIAL ─────────────────────────────────────────
             // Inserções feitas apenas uma vez ao iniciar a aplicação.
             // Sem esses dados no primário não há o que selecionar nas réplicas.
-            service.cadastrarClientes(5);
+            service.cadastrarClientes(15);
             service.cadastrarProdutos();
 
             // Aguarda a réplica sincronizar os dados recém-inseridos.

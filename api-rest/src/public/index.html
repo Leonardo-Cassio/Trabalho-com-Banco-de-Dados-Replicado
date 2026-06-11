@@ -307,8 +307,29 @@
     </div>
   </div>
 
-  <!-- ── 3. Relatório de vendas ── -->
-  <div class="card card-full">
+  <!-- ── 3. Baixo estoque ── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon icon-yellow">⚠️</div>
+      <div>
+        <h2>Produtos com Baixo Estoque</h2>
+        <div style="font-size:.72rem;color:var(--muted)">GET /produtos/baixo-estoque</div>
+      </div>
+      <span class="method">GET</span>
+    </div>
+    <div class="card-body">
+      <div class="input-row">
+        <button onclick="buscarBaixoEstoque()">Carregar</button>
+        <button class="secondary" onclick="limpar('result-estoque')">Limpar</button>
+      </div>
+      <div class="result" id="result-estoque">
+        <div class="result-empty">Clique em Carregar</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Relatório de vendas ── -->
+  <div class="card">
     <div class="card-header">
       <div class="card-icon icon-green">📊</div>
       <div>
@@ -438,7 +459,37 @@
     } catch (e) { erro('result-cliente', e.message); }
   }
 
-  // ── 3. Relatório de vendas ────────────────────────────────────────
+  // ── 3. Baixo estoque ─────────────────────────────────────────────
+  async function buscarBaixoEstoque() {
+    loading('result-estoque');
+    try {
+      const d = await api('/produtos/baixo-estoque');
+      if (d.erro) { erro('result-estoque', d.erro); return; }
+
+      const info = `<div style="padding:10px 14px;font-size:.8rem;border-bottom:1px solid var(--border)">
+        Limiar de estoque: <strong>${d.limiar_estoque}</strong> unidades
+        &nbsp;|&nbsp; Produtos críticos: <strong style="color:var(--red)">${d.total}</strong>
+      </div>`;
+
+      const lista = table(
+        ['ID', 'Produto', 'Categoria', 'Preço', 'Estoque'],
+        d.produtos,
+        p => {
+          const cor = p.estoque <= 5 ? 'var(--red)' : 'var(--yellow)';
+          return `
+            <td>${p.id}</td>
+            <td>${p.descricao}</td>
+            <td>${p.categoria}</td>
+            <td class="currency">${brl(p.valor)}</td>
+            <td style="color:${cor};font-weight:700">${p.estoque}</td>`;
+        }
+      );
+
+      document.getElementById('result-estoque').innerHTML = info + lista;
+    } catch (e) { erro('result-estoque', e.message); }
+  }
+
+  // ── 4. Relatório de vendas ────────────────────────────────────────
   async function buscarRelatorio() {
     loading('result-relatorio');
     document.getElementById('kpis-relatorio').innerHTML = '';
