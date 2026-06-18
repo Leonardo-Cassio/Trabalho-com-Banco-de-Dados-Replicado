@@ -8,27 +8,15 @@ import java.util.Properties;
 
 /**
  * Lê e expõe as configurações do arquivo config.properties.
- *
- * PRIORIDADE DE CARREGAMENTO:
- *   1º — config.properties externo (na mesma pasta de onde o JAR é executado)
- *        → ideal para trocar IPs na apresentação sem recompilar
- *   2º — config.properties embutido dentro do JAR (src/main/resources)
- *        → fallback para desenvolvimento local
- *
- * PROPRIEDADES SUPORTADAS:
- *   db.write.host/port/database/username/password  → host primário (escrita)
- *   db.read.replicas                               → lista "host:porta" separada por vírgula
- *   db.read.database/username/password             → credenciais das réplicas
- *   app.cycle.interval.ms                          → pausa entre ciclos (ms)
- *   app.cycles                                     → total de ciclos (0 = infinito)
  */
+
 public class AppConfig {
 
     private final Properties props = new Properties();
 
     public AppConfig() {
         // 1ª prioridade: arquivo externo ao lado do JAR.
-        // Permite trocar o IP do professor sem precisar recompilar.
+        // Permite trocar o IP sem precisar recompilar.
         java.io.File externo = new java.io.File("config.properties");
         if (externo.exists()) {
             try (InputStream is = new java.io.FileInputStream(externo)) {
@@ -40,8 +28,7 @@ public class AppConfig {
             }
         }
 
-        // 2ª prioridade: arquivo embutido no JAR (src/main/resources/config.properties).
-        // Usado quando não há arquivo externo — típico durante desenvolvimento.
+        // Segunda prioridade: caso não há arquivo externo, utiliza o config.properties presente no JAR
         try (InputStream is = getClass().getClassLoader().getResourceAsStream("config.properties")) {
             if (is == null) throw new RuntimeException("config.properties não encontrado.");
             props.load(is);
@@ -59,12 +46,6 @@ public class AppConfig {
     public String getWritePassword() { return props.getProperty("db.write.password"); }
 
     // ── Réplicas de leitura (READ) ────────────────────────────────────────────
-    /**
-     * Retorna a lista de réplicas configuradas.
-     * O config aceita múltiplas réplicas separadas por vírgula:
-     *   db.read.replicas=192.168.1.10:3307,192.168.1.11:3307
-     * Cada entrada é lida pelo ConnectionManager para montar a URL JDBC.
-     */
     public List<String> getReadReplicas() {
         String raw = props.getProperty("db.read.replicas", "");
         return Arrays.stream(raw.split(","))
@@ -77,14 +58,4 @@ public class AppConfig {
     public String getReadUsername() { return props.getProperty("db.read.username"); }
     public String getReadPassword() { return props.getProperty("db.read.password"); }
 
-    // ── Controle de ciclos ────────────────────────────────────────────────────
-    /** Pausa em milissegundos entre um ciclo e o próximo (configurável). */
-    public long getCycleIntervalMs() {
-        return Long.parseLong(props.getProperty("app.cycle.interval.ms", "3000"));
-    }
-
-    /** Número total de ciclos. 0 = loop infinito (parar com Ctrl+C). */
-    public int getCycles() {
-        return Integer.parseInt(props.getProperty("app.cycles", "0"));
-    }
 }

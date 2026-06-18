@@ -277,8 +277,6 @@ public class DataGeneratorService {
 
     /**
      * Gera um email único combinando o nome do cliente com o runId da JVM.
-     * O runId (timestamp em ms) garante que emails não se repitam entre execuções,
-     * evitando violação da constraint UNIQUE(email) da tabela cliente.
      */
     private String gerarEmail(String nome, int sufixo) {
         String base = nome.toLowerCase()

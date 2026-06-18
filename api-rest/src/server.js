@@ -2,30 +2,12 @@
 
 /**
  * PONTO DE ENTRADA DA API REST (Node.js)
- *
  * Inicializa o servidor Express, registra as rotas e sobe na porta configurada.
  * Toda leitura de dados é delegada às routes, que usam replicaPool.js para
  * consultar exclusivamente as réplicas MySQL — nunca o primário.
- *
- * FLUXO DE UMA REQUISIÇÃO:
- *   Navegador → GET /pedidos/1
- *     → server.js roteia para routes/pedidos.js
- *       → pedidos.js chama db.query(sql, [1])
- *         → replicaPool.js seleciona a próxima réplica (round-robin)
- *           → MySQL Réplica executa o SELECT
- *             → resultado volta como JSON para o navegador
- *
- * ARQUIVOS RELACIONADOS:
- *   src/database/replicaPool.js  — gerencia os pools de conexão com as réplicas
- *   src/routes/pedidos.js        — GET /pedidos/:id
- *   src/routes/clientes.js       — GET /clientes/:id/pedidos
- *   src/routes/produtos.js       — GET /produtos/baixo-estoque
- *   src/routes/relatorios.js     — GET /relatorios/vendas
- *   src/public/index.html        — dashboard visual servido na raiz (/)
  */
 
 // dotenv lê o arquivo .env e injeta as variáveis em process.env
-// Deve ser chamado antes de qualquer require que use process.env
 require('dotenv').config();
 
 const path       = require('path');
@@ -58,15 +40,13 @@ app.use('/clientes',   clientes);   // GET /clientes/:id/pedidos
 app.use('/produtos',   produtos);   // GET /produtos/baixo-estoque
 app.use('/relatorios', relatorios); // GET /relatorios/vendas
 
-// Health check — permite verificar se a API está no ar
-// Útil para confirmar que o servidor subiu antes de abrir o dashboard
+// Verificar se a API está no ar
 app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 
 // Fallback para rotas não registradas — retorna 404 em JSON
 app.use((_req, res) => res.status(404).json({ erro: 'Rota não encontrada.' }));
 
 // Inicializa os pools de conexão com as réplicas (lê DB_READ_REPLICAS do .env)
-// Deve acontecer ANTES de app.listen para garantir que o banco está acessível
 db.init();
 
 app.listen(PORT, () => {
